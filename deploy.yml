@@ -24,11 +24,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Inject GAS URL
-        # Replaces the placeholder in index.html with your secret GAS_URL
         run: |
           if [ -n "${{ secrets.GAS_URL }}" ]; then
             sed -i "s|window.__GAS_URL__ || ''|'${{ secrets.GAS_URL }}'|g" public/index.html
+            echo "GAS_URL injetado com sucesso"
+          else
+            echo "AVISO: secret GAS_URL não encontrado"
           fi
+
+      - name: Verify injection
+        run: |
+          grep -o "GAS_URL.*=.*'" public/index.html | head -1 || echo "Linha GAS_URL:"
+          grep "GAS_URL" public/index.html | head -3
 
       - uses: actions/configure-pages@v4
 

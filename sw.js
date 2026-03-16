@@ -1,35 +1,56 @@
-const CACHE = 'fantasma-v2';
-const STATIC = ['/', '/index.html', '/offline.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
+// Service Worker — Fantasma PWA
+const CACHE = 'fantasma-v3';
 
+// Instala sem pre-cache (evita o erro de addAll com arquivos ausentes)
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
   self.skipWaiting();
 });
 
+// Ativa e limpa caches antigos
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))));
-  self.clients.claim();
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
 });
 
+// Fetch: network first, cache fallback
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+
   const url = new URL(e.request.url);
-  // API calls — network only
-  if (url.hostname.includes('script.google.com') || url.hostname.includes('drive.google.com')) {
-    e.respondWith(fetch(e.request).catch(() => new Response('{"error":"offline"}', { headers: {'Content-Type':'application/json'} })));
-    return;
+
+  // Nunca cacheia chamadas ao GAS ou Drive
+  if (
+    url.hostname.includes('script.google.com') ||
+    url.hostname.includes('drive.google.com') ||
+    url.hostname.includes('fonts.googleapis.com') ||
+    url.hostname.includes('fonts.gstatic.com') ||
+    url.hostname.includes('cdnjs.cloudflare.com')
+  ) {
+    return; // deixa o browser lidar normalmente
   }
-  // Static assets — cache first, fallback to network then offline page
+
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(res => {
-        if (res.ok) {
+    fetch(e.request)
+      .then(res => {
+        // Só cacheia respostas válidas
+        if (res && res.status === 200 && res.type !== 'opaque') {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => e.request.mode === 'navigate' ? caches.match('/offline.html') : new Response('', {status:408}));
-    })
+      })
+      .catch(() => {
+        // Fallback: tenta o cache
+        return caches.match(e.request).then(cached => {
+          if (cached) return cached;
+          // Se for navegação, mostra offline
+          if (e.request.mode === 'navigate') {
+            return caches.match('./offline.html');
+          }
+        });
+      })
   );
 });
