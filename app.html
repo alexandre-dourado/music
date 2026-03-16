@@ -1,0 +1,597 @@
+<script>
+/* ============================================================
+   PRIVATE MUSIC FEEDBACK PLATFORM — Frontend Logic
+   Vanilla JS · Modular · No dependencies (except WaveSurfer)
+   ============================================================ */
+
+'use strict';
+
+// ── STATE ────────────────────────────────────────────────────
+const State = {
+  songs: [],         // loaded from backend
+  currentSong: null, // song object currently shown on music page
+  player: null,      // WaveSurfer instance
+  isPlaying: false,
+  selectedStar: 0,
+  selectedReaction: '',
+  alreadySubmitted: false,
+};
+
+// ── DOM SHORTCUTS ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+// ── ROUTER ───────────────────────────────────────────────────
+
+const Router = {
+  init() {
+    $('btn-home').addEventListener('click', () => Router.go('gallery'));
+    $('btn-back').addEventListener('click', () => Router.go('gallery'));
+    // Read initial page from body dataset (set by Apps Script template)
+    const initPage = document.body.dataset.page || 'gallery';
+    const initId   = document.body.dataset.musicId || '';
+    if (initPage === 'music' && initId) {
+      Router.go('music', initId);
+    } else {
+      Router.go('gallery');
+    }
+  },
+
+  go(page, id) {
+    $('page-gallery').classList.remove('active');
+    $('page-music').classList.remove('active');
+    $('page-gallery').classList.add('hidden');
+    $('page-music').classList.add('hidden');
+
+    if (page === 'gallery') {
+      $('page-gallery').classList.remove('hidden');
+      $('page-gallery').classList.add('active');
+      Gallery.render();
+      if (State.player) {
+        // Don't destroy player — keep audio alive in mini-player
+        updateMiniPlayer();
+      }
+    } else if (page === 'music') {
+      $('page-music').classList.remove('hidden');
+      $('page-music').classList.add('active');
+      MusicPage.load(id);
+    }
+  },
+};
+
+// ── GALLERY ───────────────────────────────────────────────────
+
+const Gallery = {
+  rendered: false,
+
+  async render() {
+    if (this.rendered && State.songs.length) return;
+    const grid = $('song-grid');
+    grid.innerHTML = Gallery.skeletons(8);
+    try {
+      await DataService.loadSongs();
+      grid.innerHTML = '';
+      if (!State.songs.length) {
+        grid.innerHTML = '<p style="color:var(--text-3);padding:40px;grid-column:1/-1">Nenhuma música publicada ainda.</p>';
+        return;
+      }
+      State.songs.forEach((song, i) => {
+        const card = Gallery.createCard(song, i);
+        grid.appendChild(card);
+      });
+      this.rendered = true;
+    } catch (e) {
+      grid.innerHTML = '<p style="color:var(--pink);padding:40px;grid-column:1/-1">Erro ao carregar músicas.</p>';
+      console.error(e);
+    }
+  },
+
+  skeletons(n) {
+    return Array.from({ length: n }, () => `
+      <div class="skeleton-card" aria-hidden="true">
+        <div class="skel-cover"></div>
+        <div class="skel-body">
+          <div class="skel-line w70"></div>
+          <div class="skel-line w40"></div>
+        </div>
+      </div>`).join('');
+  },
+
+  createCard(song, index) {
+    const card = document.createElement('div');
+    card.className = 'song-card';
+    card.setAttribute('role', 'listitem');
+    card.style.animationDelay = `${index * 60}ms`;
+
+    const fb = song.feedback || {};
+    const avg = fb.media_nota;
+    const reactions = fb.reacoes || {};
+
+    const coverHtml = song.capa_id
+      ? `<img class="card-cover-img" src="${getCoverUrl(song.capa_id)}" alt="${esc(song.titulo)}" loading="lazy" />`
+      : `<svg class="card-cover-gradient" viewBox="0 0 200 200">${gradientSvg(song.id)}</svg>`;
+
+    const reactionsHtml = Object.entries(reactions)
+      .filter(([, v]) => v > 0)
+      .map(([emoji, count]) => `<span class="card-reaction-item">${emoji}<span>${count}</span></span>`)
+      .join('');
+
+    card.innerHTML = `
+      <div class="card-cover-wrap">
+        ${coverHtml}
+        <button class="card-play" aria-label="Ouvir ${esc(song.titulo)}">
+          <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+        </button>
+      </div>
+      <div class="card-body">
+        <p class="card-title">${esc(song.titulo)}</p>
+        <div class="card-meta">
+          <div class="card-rating">
+            <span class="star-val">${avg ? avg.toFixed(1) : '—'}</span>
+            <span style="color:var(--accent);font-size:13px">★</span>
+          </div>
+          <div class="card-reactions">${reactionsHtml}</div>
+        </div>
+      </div>`;
+
+    card.addEventListener('click', () => Router.go('music', song.id));
+    card.querySelector('.card-play').addEventListener('click', e => {
+      e.stopPropagation();
+      Router.go('music', song.id);
+    });
+
+    return card;
+  },
+};
+
+// ── MUSIC PAGE ────────────────────────────────────────────────
+
+const MusicPage = {
+  async load(id) {
+    // Find song in cache or fetch
+    State.currentSong = State.songs.find(s => String(s.id) === String(id)) || null;
+    if (!State.currentSong) {
+      try {
+        await DataService.loadSongs();
+        State.currentSong = State.songs.find(s => String(s.id) === String(id)) || null;
+      } catch(e) { console.error(e); }
+    }
+    if (!State.currentSong) {
+      showToast('Música não encontrada.');
+      Router.go('gallery');
+      return;
+    }
+
+    const song = State.currentSong;
+    MusicPage.renderInfo(song);
+    MusicPage.renderFeedback(song);
+    MusicPage.setupForm(song);
+    MusicPage.loadPlayer(song);
+    MusicPage.loadLyrics(song);
+    updateMiniPlayer();
+  },
+
+  renderInfo(song) {
+    $('track-title').textContent = song.titulo;
+    $('track-date').textContent = formatDate(song.data_publicacao);
+    $('author-notes-text').textContent = song.notas_autor || '';
+    $('author-notes-wrap').style.display = song.notas_autor ? 'block' : 'none';
+
+    // Cover
+    const artEl = $('cover-art');
+    const glowEl = $('cover-glow');
+    if (song.capa_id) {
+      artEl.innerHTML = `<img src="${getCoverUrl(song.capa_id)}" alt="${esc(song.titulo)}" style="width:100%;height:100%;object-fit:cover;" />`;
+    } else {
+      artEl.innerHTML = `<svg viewBox="0 0 400 400" width="100%" height="100%">${gradientSvg(song.id, 400)}</svg>`;
+    }
+    const [c1, c2] = gradientColors(song.id);
+    glowEl.style.background = `radial-gradient(circle, ${c1}, ${c2})`;
+  },
+
+  renderFeedback(song) {
+    const fb = song.feedback || {};
+    const avg = fb.media_nota;
+    const total = fb.total_notas || 0;
+    const reactions = fb.reacoes || {};
+
+    // Average
+    $('rating-avg').textContent = avg ? avg.toFixed(1) : '—';
+
+    // Stars
+    const starsEl = $('rating-stars-display');
+    if (avg) {
+      starsEl.innerHTML = [1,2,3,4,5].map(i =>
+        `<span class="${i <= Math.round(avg) ? 'star-lit' : 'star-dim'}">★</span>`
+      ).join('');
+    } else {
+      starsEl.innerHTML = '<span style="color:var(--text-3);font-size:13px">sem notas ainda</span>';
+    }
+
+    $('rating-count').textContent = total ? `${total} avaliação${total !== 1 ? 'ões' : ''}` : '';
+
+    // Reactions
+    const reacDisplay = $('reaction-display');
+    reacDisplay.innerHTML = Object.entries(reactions)
+      .filter(([, v]) => v > 0)
+      .map(([emoji, count]) => `<div class="reaction-chip"><span class="emoji">${emoji}</span><span>${count}</span></div>`)
+      .join('') || '<p style="color:var(--text-3);font-size:13px">sem reações ainda</p>';
+  },
+
+  setupForm(song) {
+    State.selectedStar = 0;
+    State.selectedReaction = '';
+    State.alreadySubmitted = localStorage.getItem('submitted_' + song.id) === 'true';
+
+    const form = $('feedback-form');
+    const submitBtn = $('submit-btn');
+    const submitMsg = $('submit-msg');
+    submitMsg.classList.add('hidden');
+
+    if (State.alreadySubmitted) {
+      form.style.opacity = '0.5';
+      form.style.pointerEvents = 'none';
+      submitMsg.textContent = '✓ Você já enviou seu feedback para essa música.';
+      submitMsg.className = 'submit-msg success';
+      submitMsg.classList.remove('hidden');
+    } else {
+      form.style.opacity = '';
+      form.style.pointerEvents = '';
+    }
+
+    // Stars
+    const stars = document.querySelectorAll('.star');
+    stars.forEach(btn => {
+      btn.classList.remove('active');
+      btn.addEventListener('click', () => {
+        State.selectedStar = Number(btn.dataset.val);
+        stars.forEach(s => s.classList.toggle('active', Number(s.dataset.val) <= State.selectedStar));
+      });
+    });
+
+    // Reactions
+    const reacBtns = document.querySelectorAll('.reaction-btn');
+    reacBtns.forEach(btn => {
+      btn.classList.remove('active');
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.val;
+        if (State.selectedReaction === val) {
+          State.selectedReaction = '';
+          btn.classList.remove('active');
+        } else {
+          State.selectedReaction = val;
+          reacBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      });
+    });
+
+    // Submit
+    submitBtn.onclick = async () => {
+      if (State.alreadySubmitted) return;
+      const comentario = $('comment-input').value.trim();
+      if (!State.selectedStar && !State.selectedReaction && !comentario) {
+        showToast('Dê uma nota, reaja ou deixe um comentário.');
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Enviando...';
+      try {
+        const payload = {
+          musica_id: song.id,
+          nota: State.selectedStar || null,
+          reacao: State.selectedReaction || '',
+          comentario,
+          user_hash: getUserHash(),
+        };
+        await BackendService.submitFeedback(payload);
+        localStorage.setItem('submitted_' + song.id, 'true');
+        State.alreadySubmitted = true;
+
+        submitMsg.textContent = '🎉 Feedback enviado! Obrigado.';
+        submitMsg.className = 'submit-msg success';
+        submitMsg.classList.remove('hidden');
+        form.style.opacity = '0.5';
+        form.style.pointerEvents = 'none';
+        showToast('Feedback enviado!');
+      } catch(e) {
+        submitMsg.textContent = 'Erro ao enviar. Tente novamente.';
+        submitMsg.className = 'submit-msg error';
+        submitMsg.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enviar feedback';
+      }
+    };
+  },
+
+  loadPlayer(song) {
+    const audioUrl = getAudioUrl(song.audio_id);
+    const storageKey = 'pos_' + song.id;
+
+    // Destroy previous instance
+    if (State.player) {
+      try { State.player.destroy(); } catch(e) {}
+      State.player = null;
+    }
+
+    State.player = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: 'rgba(255,255,255,0.15)',
+      progressColor: 'rgba(200,255,87,0.8)',
+      cursorColor: '#c8ff57',
+      cursorWidth: 2,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
+      height: 64,
+      normalize: true,
+      interact: true,
+      backend: 'WebAudio',
+    });
+
+    if (audioUrl) {
+      State.player.load(audioUrl);
+    }
+
+    State.player.on('ready', () => {
+      const saved = parseFloat(localStorage.getItem(storageKey) || '0');
+      if (saved > 0) State.player.seekTo(saved / State.player.getDuration());
+      $('time-total').textContent = formatTime(State.player.getDuration());
+    });
+
+    State.player.on('audioprocess', t => {
+      $('time-current').textContent = formatTime(t);
+      localStorage.setItem(storageKey, t.toFixed(1));
+    });
+
+    State.player.on('play', () => {
+      State.isPlaying = true;
+      $('play-btn').querySelector('.icon-play').classList.add('hidden');
+      $('play-btn').querySelector('.icon-pause').classList.remove('hidden');
+      $('mini-play-btn').textContent = '⏸';
+    });
+
+    State.player.on('pause', () => {
+      State.isPlaying = false;
+      $('play-btn').querySelector('.icon-play').classList.remove('hidden');
+      $('play-btn').querySelector('.icon-pause').classList.add('hidden');
+      $('mini-play-btn').textContent = '▶';
+    });
+
+    State.player.on('finish', () => {
+      localStorage.removeItem(storageKey);
+      State.isPlaying = false;
+    });
+
+    // Play button
+    $('play-btn').onclick = () => State.player.playPause();
+    $('mini-play-btn').onclick = () => State.player && State.player.playPause();
+
+    // Volume
+    const volSlider = $('volume-slider');
+    State.player.setVolume(parseFloat(volSlider.value));
+    volSlider.addEventListener('input', () => State.player.setVolume(parseFloat(volSlider.value)));
+
+    // Keyboard shortcut: Space
+    document.onkeydown = e => {
+      if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
+        e.preventDefault();
+        State.player && State.player.playPause();
+      }
+    };
+  },
+
+  async loadLyrics(song) {
+    const scroll = $('lyrics-scroll');
+    scroll.innerHTML = '<div class="lyrics-skeleton"><div class="skel-line w70"></div><div class="skel-line w90"></div><div class="skel-line w55"></div></div>';
+    try {
+      const text = await BackendService.getLyrics(song.letra_id);
+      if (text && text.trim()) {
+        scroll.innerHTML = `<pre id="lyrics-text">${esc(text)}</pre>`;
+      } else {
+        scroll.innerHTML = '<p class="lyrics-empty">Letra não disponível.</p>';
+      }
+    } catch(e) {
+      scroll.innerHTML = '<p class="lyrics-empty">Erro ao carregar a letra.</p>';
+    }
+  },
+};
+
+// ── DATA SERVICE ──────────────────────────────────────────────
+
+const DataService = {
+  async loadSongs() {
+    if (State.songs.length) return State.songs;
+    const songs = await BackendService.getMusicas();
+    State.songs = songs;
+    return songs;
+  },
+};
+
+// ── BACKEND SERVICE ───────────────────────────────────────────
+// Wraps google.script.run calls in Promises
+
+const BackendService = {
+  call(fnName, ...args) {
+    return new Promise((resolve, reject) => {
+      let runner = google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject);
+      runner[fnName](...args);
+    });
+  },
+
+  getMusicas()           { return this.call('getMusicas'); },
+  getMusica(id)          { return this.call('getMusica', id); },
+  getLyrics(letraId)     { return this.call('getLyrics', letraId); },
+  submitFeedback(payload){ return this.call('submitFeedback', payload); },
+};
+
+// ── HELPERS ───────────────────────────────────────────────────
+
+function getCoverUrl(capaId) {
+  if (!capaId) return null;
+  return `https://drive.google.com/thumbnail?id=${capaId}&sz=w400`;
+}
+
+function getAudioUrl(audioId) {
+  if (!audioId) return null;
+  return `https://drive.google.com/uc?export=download&id=${audioId}`;
+}
+
+function formatTime(secs) {
+  if (isNaN(secs)) return '0:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function formatDate(raw) {
+  if (!raw) return '';
+  try {
+    const d = new Date(raw);
+    return d.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch(e) { return String(raw); }
+}
+
+function esc(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function getUserHash() {
+  let h = localStorage.getItem('user_hash');
+  if (!h) {
+    h = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    localStorage.setItem('user_hash', h);
+  }
+  return h;
+}
+
+function showToast(msg, duration = 2800) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), duration);
+}
+
+function updateMiniPlayer() {
+  const mini = $('mini-player');
+  const miniTitle = $('mini-title');
+  if (State.currentSong) {
+    mini.classList.remove('hidden');
+    miniTitle.textContent = State.currentSong.titulo;
+  } else {
+    mini.classList.add('hidden');
+  }
+}
+
+// Gradient helpers for cards/covers without art
+const PALETTE = [
+  ['#c8ff57','#00d4aa'],
+  ['#7c5cbf','#e05c8a'],
+  ['#ff6b35','#ffd166'],
+  ['#4ecdc4','#556270'],
+  ['#f7971e','#ffd200'],
+  ['#ee0979','#ff6a00'],
+  ['#a8edea','#fed6e3'],
+  ['#d299c2','#fef9d7'],
+];
+
+function gradientColors(id) {
+  const idx = parseInt(String(id).replace(/\D/g,'') || '0', 10) % PALETTE.length;
+  return PALETTE[idx];
+}
+
+function gradientSvg(id, size = 200) {
+  const [c1, c2] = gradientColors(id);
+  const gid = 'g' + id;
+  return `
+    <defs>
+      <linearGradient id="${gid}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${c1}" />
+        <stop offset="100%" stop-color="${c2}" />
+      </linearGradient>
+    </defs>
+    <rect width="${size}" height="${size}" fill="url(#${gid})" />
+    <circle cx="${size*0.3}" cy="${size*0.4}" r="${size*0.25}" fill="rgba(255,255,255,0.08)" />
+    <circle cx="${size*0.75}" cy="${size*0.65}" r="${size*0.18}" fill="rgba(0,0,0,0.12)" />`;
+}
+
+// ── PWA ───────────────────────────────────────────────────────
+
+function registerPWA() {
+  // Inject manifest link
+  const manifest = {
+    name: 'Ouça Agora',
+    short_name: 'OuçaAgora',
+    description: 'Plataforma privada de escuta de músicas',
+    start_url: window.location.href,
+    display: 'standalone',
+    background_color: '#0a0a0f',
+    theme_color: '#0a0a0f',
+    icons: [
+      { src: pwaIconSvg(192), sizes: '192x192', type: 'image/svg+xml' },
+      { src: pwaIconSvg(512), sizes: '512x512', type: 'image/svg+xml' },
+    ],
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = url;
+  document.head.appendChild(link);
+
+  // Register service worker (inline as blob — works in GAS environment)
+  if ('serviceWorker' in navigator) {
+    const swCode = `
+const CACHE = 'ouca-agora-v1';
+const OFFLINE = '/offline.html';
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll([])));
+  self.skipWaiting();
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys =>
+    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+  ));
+  self.clients.claim();
+});
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    fetch(e.request).then(res => {
+      const clone = res.clone();
+      caches.open(CACHE).then(c => c.put(e.request, clone));
+      return res;
+    }).catch(() => caches.match(e.request))
+  );
+});`;
+    const swBlob = new Blob([swCode], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swUrl).catch(() => {});
+  }
+}
+
+function pwaIconSvg(size) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">
+    <rect width="${size}" height="${size}" rx="${size*0.22}" fill="#0a0a0f"/>
+    <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle"
+      font-size="${size*0.55}" font-family="serif">◈</text>
+    <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle"
+      font-size="${size*0.55}" font-family="serif" fill="#c8ff57">◈</text>
+  </svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(svg);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  Router.init();
+  registerPWA();
+});
+</script>

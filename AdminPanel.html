@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>Fantasma Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0c09; --bg2:#161210; --bg3:#201a13; --bg4:#2a221a;
+  --brd:rgba(220,175,100,.12); --brd2:rgba(220,175,100,.25);
+  --gl:rgba(220,175,100,.06);
+  --t1:#ede0c5; --t2:#9e7d55; --t3:#584030;
+  --ac:#e9aa38; --acd:rgba(233,170,56,.14);
+  --green:#69be78; --red:#c25444; --blue:#5a8dc0;
+  --ff:'DM Sans',sans-serif; --ffm:'IBM Plex Mono',monospace; --ffd:'Syne',sans-serif;
+}
+body{font-family:var(--ff);background:var(--bg);color:var(--t1);font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── HEADER ─ */
+.ap-hdr{background:var(--bg2);border-bottom:1px solid var(--brd);padding:11px 18px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.ap-logo{font-family:var(--ffd);font-size:15px;font-weight:800;color:var(--ac);letter-spacing:-.01em}
+.ap-logo span{color:var(--t2);font-size:12px;font-weight:400;margin-left:8px}
+.hdr-btns{display:flex;gap:6px}
+
+/* ── BUTTONS ─ */
+.btn{border:none;border-radius:5px;padding:6px 13px;cursor:pointer;font-family:var(--ff);font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:5px;transition:all .15s ease}
+.btn-ac{background:var(--ac);color:#000}.btn-ac:hover{filter:brightness(1.08)}
+.btn-out{background:transparent;border:1px solid var(--brd);color:var(--t2)}.btn-out:hover{border-color:var(--brd2);color:var(--t1);background:var(--gl)}
+.btn-red{background:rgba(194,84,68,.15);border:1px solid rgba(194,84,68,.3);color:var(--red)}.btn-red:hover{background:rgba(194,84,68,.25)}
+.btn-sm{padding:4px 9px;font-size:11px}
+.btn:disabled{opacity:.38;cursor:not-allowed;pointer-events:none}
+
+/* ── TABS ─ */
+.tabs{display:flex;border-bottom:1px solid var(--brd);background:var(--bg2);flex-shrink:0}
+.tab{padding:9px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--t2);cursor:pointer;font-family:var(--ffm);font-size:10px;letter-spacing:.12em;text-transform:uppercase;transition:all .15s}
+.tab:hover{color:var(--t1)}.tab.on{color:var(--ac);border-bottom-color:var(--ac)}
+
+/* ── BODY ─ */
+.ap-body{flex:1;overflow:hidden;display:flex}
+.tab-pane{display:none;flex:1;overflow-y:auto;padding:14px 18px}
+.tab-pane.on{display:block}
+.tab-pane::-webkit-scrollbar{width:3px}.tab-pane::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:2px}
+
+/* ── STATUS BAR ─ */
+.ap-bar{background:var(--bg2);border-top:1px solid var(--brd);padding:6px 18px;flex-shrink:0;display:flex;align-items:center;gap:8px;font-family:var(--ffm);font-size:10px;color:var(--t3)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;transition:background .3s}
+.dot.load{background:var(--ac);animation:dp .8s ease-in-out infinite}
+.dot.err{background:var(--red)}
+@keyframes dp{0%,100%{opacity:.3}50%{opacity:1}}
+
+/* ── TABLE ─ */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{font-family:var(--ffm);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--t3);padding:7px 9px;text-align:left;border-bottom:1px solid var(--brd);position:sticky;top:0;background:var(--bg);z-index:1}
+.tbl td{padding:7px 9px;border-bottom:1px solid rgba(220,175,100,.055);vertical-align:middle}
+.tbl tr:hover td{background:var(--gl)}
+
+/* Pill badges */
+.pill{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:100px;font-size:10px;font-family:var(--ffm)}
+.pill-g{background:rgba(105,190,120,.14);color:var(--green);border:1px solid rgba(105,190,120,.25)}
+.pill-d{background:var(--bg3);color:var(--t3);border:1px solid var(--brd)}
+
+/* Song title cell */
+.stc{display:flex;align-items:center;gap:9px}
+.thumb{width:34px;height:34px;border-radius:3px;object-fit:cover;background:var(--bg3);flex-shrink:0;display:block}
+.thumb-ph{width:34px;height:34px;border-radius:3px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.sn{font-weight:500;color:var(--t1);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sid{font-family:var(--ffm);font-size:9px;color:var(--t3);margin-top:1px}
+.acts{display:flex;gap:4px}
+
+/* ── MODAL ─ */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px)}
+.modal{background:var(--bg2);border:1px solid var(--brd2);border-radius:10px;padding:22px;width:510px;max-width:96vw;max-height:88vh;overflow-y:auto}
+.modal h3{font-family:var(--ffd);font-size:17px;font-weight:800;color:var(--ac);margin-bottom:18px;letter-spacing:-.01em}
+.f{margin-bottom:13px}
+.fl{display:block;font-family:var(--ffm);font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--t3);margin-bottom:5px}
+.fi,.ft,.fsel{width:100%;background:var(--bg3);border:1px solid var(--brd);border-radius:5px;color:var(--t1);font-family:var(--ff);font-size:13px;padding:8px 11px;outline:none;transition:border-color .15s}
+.fi:focus,.ft:focus{border-color:var(--brd2)}
+.ft{resize:vertical;min-height:64px}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* Toggle */
+.tgl-wrap{display:flex;align-items:center;gap:9px}
+.tgl{width:38px;height:20px;background:var(--bg3);border-radius:100px;position:relative;cursor:pointer;border:1px solid var(--brd);transition:background .2s}
+.tgl.on{background:var(--ac)}
+.tgl::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;background:#fff;border-radius:50%;transition:left .2s}
+.tgl.on::after{left:22px}
+.mfooter{display:flex;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--brd);justify-content:flex-end}
+
+/* ── UPLOAD ZONE ─ */
+.upzone{border:2px dashed var(--brd);border-radius:7px;padding:18px;text-align:center;cursor:pointer;transition:all .18s;position:relative}
+.upzone:hover,.upzone.drag{border-color:var(--ac);background:var(--acd)}
+.upzone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upzone .upico{font-size:26px;margin-bottom:7px}
+.upzone p{color:var(--t2);font-size:12px;line-height:1.5}
+.upzone p b{color:var(--t1)}
+.uprev{width:100%;max-height:110px;object-fit:cover;border-radius:5px;margin-top:9px;display:none}
+.uprev.vis{display:block}
+.upbar{height:3px;background:var(--bg3);border-radius:2px;margin-top:7px;overflow:hidden;display:none}
+.upbar.vis{display:block}
+.upbar-fill{height:100%;background:var(--ac);transition:width .3s;width:0}
+.idrow{display:flex;align-items:center;gap:7px;margin-top:7px}
+.idlbl{font-family:var(--ffm);font-size:9px;color:var(--t3);white-space:nowrap}
+.idfi{flex:1;background:var(--bg3);border:1px solid var(--brd);border-radius:4px;color:var(--t1);font-family:var(--ffm);font-size:10px;padding:5px 8px;outline:none}
+
+/* ── SCAN CARD ─ */
+.scard{background:var(--bg2);border:1px solid var(--brd);border-radius:9px;padding:16px;margin-bottom:14px}
+.scard h4{font-family:var(--ffd);font-size:13px;font-weight:700;color:var(--t1);margin-bottom:5px}
+.scard p{color:var(--t2);font-size:12px;line-height:1.6;margin-bottom:11px}
+.sres{background:var(--bg3);border-radius:5px;padding:11px;font-family:var(--ffm);font-size:10px;color:var(--t2);white-space:pre;display:none;max-height:180px;overflow-y:auto;line-height:1.6}
+.sres.vis{display:block}
+
+/* ── FEEDBACK ─ */
+.fb-item{background:var(--bg2);border:1px solid var(--brd);border-radius:7px;padding:11px;margin-bottom:7px}
+.fb-meta{display:flex;align-items:center;gap:9px;margin-bottom:7px;flex-wrap:wrap}
+.fb-sts{color:var(--ac);font-size:12px}
+.fb-hash,.fb-ts{font-family:var(--ffm);font-size:9px;color:var(--t3)}
+.fb-cmt{font-size:12px;color:var(--t2);line-height:1.65;border-left:2px solid var(--brd);padding-left:9px;margin-top:5px;font-style:italic}
+
+/* ── CONFIG ─ */
+.cfg-card{background:var(--bg2);border:1px solid var(--brd);border-radius:9px;padding:16px;margin-bottom:14px}
+.cfg-card h4{font-family:var(--ffd);font-size:13px;font-weight:700;color:var(--t1);margin-bottom:5px}
+.cfg-card > p{color:var(--t2);font-size:12px;line-height:1.6;margin-bottom:14px}
+.cfg-f{margin-bottom:11px}
+.cfg-f label{display:block;font-family:var(--ffm);font-size:8.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--t3);margin-bottom:4px}
+.cfg-f input{width:100%;background:var(--bg3);border:1px solid var(--brd);border-radius:5px;color:var(--t1);font-family:var(--ffm);font-size:11px;padding:7px 9px;outline:none;transition:border-color .15s}
+.cfg-f input:focus{border-color:var(--brd2)}
+.cfg-hint{font-size:9px;color:var(--t3);margin-top:3px;line-height:1.5}
+
+/* ── MISC ─ */
+.loader{text-align:center;padding:38px;color:var(--t3);font-family:var(--ffm);font-size:10px}
+.loader::after{content:'';display:block;margin:11px auto 0;width:22px;height:22px;border:2px solid var(--bg3);border-top-color:var(--ac);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:38px;color:var(--t3);font-size:13px}
+.empty-ico{font-size:34px;margin-bottom:11px}
+</style>
+</head>
+<body>
+
+<div class="ap-hdr">
+  <div class="ap-logo">Fantasma <span>Admin Panel</span></div>
+  <div class="hdr-btns">
+    <button class="btn btn-out btn-sm" onclick="flushCache()">🔄 Cache</button>
+    <button class="btn btn-ac btn-sm"  onclick="scanFolders()">📂 Scan pastas</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="songs">🎵 Músicas</button>
+  <button class="tab"    data-tab="feedback">💬 Feedback</button>
+  <button class="tab"    data-tab="scan">📂 Import</button>
+  <button class="tab"    data-tab="config">⚙ Config</button>
+</div>
+
+<div class="ap-body">
+
+  <!-- SONGS -->
+  <div class="tab-pane on" id="tp-songs">
+    <div id="sk-songs" class="loader">Carregando músicas</div>
+    <div id="tbl-wrap" style="display:none">
+      <table class="tbl">
+        <thead><tr>
+          <th style="width:36px">#</th>
+          <th>Música</th>
+          <th>Status</th>
+          <th>Nota</th>
+          <th>Capa</th>
+          <th>Ações</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- FEEDBACK -->
+  <div class="tab-pane" id="tp-feedback">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:13px;flex-wrap:wrap">
+      <label style="font-family:var(--ffm);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--t3)">Música:</label>
+      <select id="fb-sel" style="background:var(--bg3);border:1px solid var(--brd);border-radius:5px;color:var(--t1);padding:5px 9px;font-family:var(--ff);font-size:12px;outline:none">
+        <option value="">Selecione...</option>
+      </select>
+      <button class="btn btn-out btn-sm" onclick="loadFB()">Ver feedback</button>
+    </div>
+    <div id="fb-out"><div class="empty"><div class="empty-ico">💬</div>Selecione uma música</div></div>
+  </div>
+
+  <!-- SCAN -->
+  <div class="tab-pane" id="tp-scan">
+    <div class="scard">
+      <h4>📂 Escanear Pastas do Drive</h4>
+      <p>Varre a pasta <b>/audios</b> e adiciona músicas novas à planilha, cruzando automaticamente com <b>/letras</b> e <b>/capas</b> pelo nome do arquivo (sem extensão).</p>
+      <button class="btn btn-ac" onclick="scanFolders()">Escanear agora</button>
+      <div class="sres" id="scan-out"></div>
+    </div>
+    <div class="scard">
+      <h4>🔄 Limpar Cache</h4>
+      <p>Força a releitura da planilha na próxima requisição do app.</p>
+      <button class="btn btn-out" onclick="flushCache()">Limpar cache</button>
+    </div>
+  </div>
+
+  <!-- CONFIG -->
+  <div class="tab-pane" id="tp-config">
+    <div class="cfg-card">
+      <h4>⚙ IDs de Pastas e Planilha</h4>
+      <p>Salvos como Script Properties — não ficam visíveis no código.</p>
+      <div class="cfg-f">
+        <label>Spreadsheet ID</label>
+        <input type="text" id="c-ss" placeholder="1BxiM..."/>
+        <div class="cfg-hint">URL: …/spreadsheets/d/<b>[ID]</b>/edit</div>
+      </div>
+      <div class="cfg-f">
+        <label>Pasta /audios — ID</label>
+        <input type="text" id="c-aud" placeholder="1abc…"/>
+      </div>
+      <div class="cfg-f">
+        <label>Pasta /letras — ID</label>
+        <input type="text" id="c-ltr" placeholder="1abc…"/>
+      </div>
+      <div class="cfg-f">
+        <label>Pasta /capas — ID</label>
+        <input type="text" id="c-cap" placeholder="1abc…"/>
+        <div class="cfg-hint">URL da pasta: …/drive/folders/<b>[ID]</b></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+        <button class="btn btn-ac" onclick="saveConfig()">Salvar</button>
+        <span id="c-saved" style="display:none;font-size:12px;color:var(--green)">✓ Salvo!</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /.ap-body -->
+
+<div class="ap-bar">
+  <div class="dot" id="dot"></div>
+  <span id="bar-txt">Pronto</span>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="ov hidden" id="modal">
+  <div class="modal">
+    <h3>Editar Música</h3>
+    <input type="hidden" id="m-id"/>
+
+    <div class="f">
+      <label class="fl">Título</label>
+      <input type="text" class="fi" id="m-titulo"/>
+    </div>
+    <div class="frow">
+      <div class="f">
+        <label class="fl">Audio File ID</label>
+        <input type="text" class="fi" id="m-audio"/>
+      </div>
+      <div class="f">
+        <label class="fl">Letra File ID</label>
+        <input type="text" class="fi" id="m-letra"/>
+      </div>
+    </div>
+    <div class="f">
+      <label class="fl">Notas do artista</label>
+      <textarea class="ft" id="m-notas" rows="3"></textarea>
+    </div>
+    <div class="frow">
+      <div class="f">
+        <label class="fl">Ordem</label>
+        <input type="number" class="fi" id="m-ordem" min="1"/>
+      </div>
+      <div class="f">
+        <label class="fl">Data publicação</label>
+        <input type="date" class="fi" id="m-data"/>
+      </div>
+    </div>
+    <div class="f">
+      <label class="fl">Publicar</label>
+      <div class="tgl-wrap">
+        <div class="tgl" id="m-pub-tgl" onclick="togglePub()"></div>
+        <span id="m-pub-lbl" style="font-size:12px;color:var(--t2)">Privado</span>
+      </div>
+    </div>
+
+    <!-- Cover upload -->
+    <div class="f">
+      <label class="fl">Capa</label>
+      <div class="upzone" id="upzone">
+        <input type="file" id="cover-input" accept="image/*" onchange="handleImg(event)"/>
+        <div class="upico">🖼</div>
+        <p><b>Clique ou arraste</b> uma imagem</p>
+        <p style="font-size:10px;color:var(--t3);margin-top:3px">JPG, PNG, WEBP — máx 5 MB</p>
+        <img class="uprev" id="uprev"/>
+        <div class="upbar" id="upbar"><div class="upbar-fill" id="upfill"></div></div>
+      </div>
+      <div class="idrow">
+        <span class="idlbl">ou File ID existente:</span>
+        <input type="text" class="idfi" id="m-capa" placeholder="1abc…"/>
+      </div>
+    </div>
+
+    <div class="mfooter">
+      <button class="btn btn-out"       onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-red btn-sm" onclick="delSong()">🗑 Excluir</button>
+      <button class="btn btn-ac"         onclick="saveEdit()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+let songs=[], pubState=false;
+
+// ── INIT ─────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.tab-pane').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on');
+    document.getElementById('tp-'+t.dataset.tab).classList.add('on');
+  });
+});
+
+document.addEventListener('DOMContentLoaded',()=>{ loadSongs(); loadConfig(); });
+
+// ── STATUS ───────────────────────────────────────────────────
+function st(msg,type='ok'){
+  document.getElementById('bar-txt').textContent=msg;
+  document.getElementById('dot').className='dot'+(type==='load'?' load':type==='err'?' err':'');
+}
+
+// ── SONGS ────────────────────────────────────────────────────
+function loadSongs(){
+  st('Carregando...','load');
+  google.script.run
+    .withSuccessHandler(data=>{
+      songs=data;
+      renderTable(data);
+      populateFBSel(data);
+      st(`${data.length} músicas`);
+    })
+    .withFailureHandler(e=>st('Erro: '+e.message,'err'))
+    .adminGetAll();
+}
+
+function renderTable(data){
+  document.getElementById('sk-songs').style.display='none';
+  const w=document.getElementById('tbl-wrap'); w.style.display='block';
+  const tb=document.getElementById('tbody');
+  if(!data.length){ tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:28px;color:var(--t3)">Nenhuma música. Use Scan para importar.</td></tr>'; return; }
+  tb.innerHTML=data.map(s=>{
+    const fb=s.feedback||{}, pub=s.publicar===true||s.publicar==='TRUE';
+    const th=s.capa_id
+      ?`<img class="thumb" src="https://drive.google.com/thumbnail?id=${s.capa_id}&sz=w80" onerror="this.style.display='none'" loading="lazy">`
+      :`<div class="thumb-ph">🎵</div>`;
+    return`<tr>
+      <td style="color:var(--t3);font-family:var(--ffm)">${s.ordem||'—'}</td>
+      <td><div class="stc">${th}<div><div class="sn">${esc(s.titulo)}</div><div class="sid">${s.id}</div></div></div></td>
+      <td><span class="pill ${pub?'pill-g':'pill-d'}">${pub?'✓ Público':'○ Privado'}</span></td>
+      <td style="font-family:var(--ffm);font-size:11px;color:${fb.media_nota?'var(--ac)':'var(--t3)'}">
+        ${fb.media_nota?fb.media_nota.toFixed(1)+' ★':'—'}${fb.total_notas?`<span style="color:var(--t3);font-size:9px"> (${fb.total_notas})</span>`:''}
+      </td>
+      <td style="font-size:11px;color:${s.capa_id?'var(--green)':'var(--t3)'}">
+        ${s.capa_id?'✓ Sim':'○ Não'}
+      </td>
+      <td><div class="acts">
+        <button class="btn btn-out btn-sm" onclick='openEdit(${JSON.stringify(s)})'>✏</button>
+        <button class="btn btn-sm" style="background:none;border:1px solid var(--brd);color:${pub?'var(--red)':'var(--green)'};border-radius:4px;cursor:pointer;font-size:11px;padding:4px 8px" onclick="toggle('${s.id}','${pub}')">
+          ${pub?'Privar':'Publicar'}
+        </button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function toggle(id,pub){
+  const isPub=pub==='true'||pub===true;
+  st('Atualizando...','load');
+  google.script.run
+    .withSuccessHandler(()=>{ loadSongs(); toast(isPub?'Música privada.':'Música publicada!'); })
+    .withFailureHandler(e=>st('Erro: '+e.message,'err'))
+    .adminTogglePublish(id);
+}
+
+// ── EDIT MODAL ────────────────────────────────────────────────
+function openEdit(s){
+  document.getElementById('m-id').value     = s.id;
+  document.getElementById('m-titulo').value = s.titulo||'';
+  document.getElementById('m-audio').value  = s.audio_id||'';
+  document.getElementById('m-letra').value  = s.letra_id||'';
+  document.getElementById('m-capa').value   = s.capa_id||'';
+  document.getElementById('m-notas').value  = s.notas_autor||'';
+  document.getElementById('m-ordem').value  = s.ordem||'';
+  document.getElementById('m-data').value   = s.data_publicacao||'';
+  pubState = s.publicar===true||s.publicar==='TRUE';
+  updPub();
+  // Reset upload UI
+  document.getElementById('uprev').className='uprev';
+  document.getElementById('uprev').src='';
+  document.getElementById('upbar').className='upbar';
+  document.getElementById('upfill').style.width='0';
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function closeModal(){ document.getElementById('modal').classList.add('hidden'); }
+function togglePub(){ pubState=!pubState; updPub(); }
+function updPub(){
+  document.getElementById('m-pub-tgl').classList.toggle('on',pubState);
+  document.getElementById('m-pub-lbl').textContent=pubState?'Público':'Privado';
+}
+
+function saveEdit(){
+  const id=document.getElementById('m-id').value;
+  const up={
+    titulo:         document.getElementById('m-titulo').value,
+    audio_id:       document.getElementById('m-audio').value,
+    letra_id:       document.getElementById('m-letra').value,
+    capa_id:        document.getElementById('m-capa').value,
+    notas_autor:    document.getElementById('m-notas').value,
+    ordem:          document.getElementById('m-ordem').value,
+    data_publicacao:document.getElementById('m-data').value,
+    publicar:       pubState?'TRUE':'FALSE',
+  };
+  st('Salvando...','load');
+  google.script.run
+    .withSuccessHandler(()=>{ closeModal(); loadSongs(); toast('Salvo!'); })
+    .withFailureHandler(e=>st('Erro: '+e.message,'err'))
+    .adminUpdate(id,up);
+}
+
+function delSong(){
+  const id=document.getElementById('m-id').value;
+  const titulo=document.getElementById('m-titulo').value;
+  if(!confirm(`Excluir "${titulo}"?\nEsta ação não pode ser desfeita.`)) return;
+  google.script.run
+    .withSuccessHandler(()=>{ closeModal(); loadSongs(); toast('Música excluída.'); })
+    .withFailureHandler(e=>st('Erro: '+e.message,'err'))
+    .adminDelete(id);
+}
+
+// ── COVER UPLOAD ──────────────────────────────────────────────
+function handleImg(e){
+  const file=e.target.files[0]; if(!file) return;
+  if(file.size>5*1024*1024){ toast('Arquivo muito grande (máx 5MB)'); return; }
+  const rd=new FileReader();
+  rd.onload=ev=>{
+    const prev=document.getElementById('uprev');
+    prev.src=ev.target.result; prev.className='uprev vis';
+    doUpload(file,ev.target.result);
+  };
+  rd.readAsDataURL(file);
+}
+
+function doUpload(file,dataUrl){
+  const bar=document.getElementById('upbar'), fill=document.getElementById('upfill');
+  bar.className='upbar vis'; fill.style.width='25%';
+  st('Enviando capa...','load');
+  const base64=dataUrl.split(',')[1];
+  fill.style.width='55%';
+  google.script.run
+    .withSuccessHandler(fid=>{
+      fill.style.width='100%';
+      document.getElementById('m-capa').value=fid;
+      st('Capa enviada!');
+      toast('✓ Capa salva no Drive');
+      setTimeout(()=>{ bar.className='upbar'; fill.style.width='0'; },1600);
+    })
+    .withFailureHandler(e=>{ st('Erro upload: '+e.message,'err'); bar.className='upbar'; })
+    .adminUploadCover(base64,file.type,file.name);
+}
+
+// Drag & drop
+const uz=document.getElementById('upzone');
+uz.addEventListener('dragover',e=>{e.preventDefault();uz.classList.add('drag')});
+uz.addEventListener('dragleave',()=>uz.classList.remove('drag'));
+uz.addEventListener('drop',e=>{
+  e.preventDefault(); uz.classList.remove('drag');
+  const f=e.dataTransfer.files[0];
+  if(f&&f.type.startsWith('image/')){
+    const rd=new FileReader();
+    rd.onload=ev=>{
+      document.getElementById('uprev').src=ev.target.result;
+      document.getElementById('uprev').className='uprev vis';
+      doUpload(f,ev.target.result);
+    };
+    rd.readAsDataURL(f);
+  }
+});
+
+// ── FEEDBACK ─────────────────────────────────────────────────
+function populateFBSel(data){
+  const sel=document.getElementById('fb-sel');
+  sel.innerHTML='<option value="">Selecione...</option>'+data.map(s=>`<option value="${s.id}">${esc(s.titulo)}</option>`).join('');
+}
+
+function loadFB(){
+  const id=document.getElementById('fb-sel').value; if(!id) return;
+  const out=document.getElementById('fb-out'); out.innerHTML='<div class="loader">Carregando</div>';
+  google.script.run
+    .withSuccessHandler(items=>renderFB(items))
+    .withFailureHandler(e=>{ out.innerHTML=`<div class="empty">Erro: ${e.message}</div>`; })
+    .adminGetFeedback(id);
+}
+
+function renderFB(items){
+  const out=document.getElementById('fb-out');
+  if(!items.length){ out.innerHTML='<div class="empty"><div class="empty-ico">💬</div>Sem feedback ainda.</div>'; return; }
+  out.innerHTML=items.map(fb=>`
+    <div class="fb-item">
+      <div class="fb-meta">
+        <span class="fb-hash">👤 ${fb.user_hash}</span>
+        <span class="fb-ts">${new Date(fb.timestamp).toLocaleDateString('pt-BR')}</span>
+        ${fb.reacao?`<span style="font-size:15px">${fb.reacao}</span>`:''}
+        ${fb.nota?`<span class="fb-sts">${'★'.repeat(fb.nota)}${'☆'.repeat(5-fb.nota)}</span>`:''}
+      </div>
+      ${fb.comentario?`<div class="fb-cmt">${esc(fb.comentario)}</div>`:''}
+    </div>`).join('');
+}
+
+// ── SCAN ─────────────────────────────────────────────────────
+function scanFolders(){
+  const out=document.getElementById('scan-out');
+  out.className='sres vis'; out.textContent='⏳ Escaneando...';
+  st('Escaneando...','load');
+  google.script.run
+    .withSuccessHandler(r=>{
+      if(r.error){ out.textContent='❌ '+r.error; st('Erro','err'); return; }
+      out.textContent=`✅ Adicionadas (${r.added.length}):\n${r.added.map(n=>' + '+n).join('\n')||'  nenhuma'}\n\n⏭ Ignoradas (${r.skipped.length}):\n${r.skipped.map(n=>' · '+n).join('\n')||'  nenhuma'}`;
+      st(`+${r.added.length} músicas adicionadas`);
+      loadSongs();
+    })
+    .withFailureHandler(e=>{ out.textContent='❌ '+e.message; st('Erro','err'); })
+    .adminScanFolders();
+}
+
+// ── CACHE ─────────────────────────────────────────────────────
+function flushCache(){
+  st('Limpando cache...','load');
+  google.script.run
+    .withSuccessHandler(()=>{ toast('Cache limpo!'); st('Cache limpo'); })
+    .withFailureHandler(e=>st('Erro','err'))
+    .adminFlushCache();
+}
+
+// ── CONFIG ─────────────────────────────────────────────────────
+function loadConfig(){
+  google.script.run
+    .withSuccessHandler(c=>{
+      document.getElementById('c-ss').value  = c.SS_ID   ||'';
+      document.getElementById('c-aud').value = c.F_AUDIOS||'';
+      document.getElementById('c-ltr').value = c.F_LETRAS||'';
+      document.getElementById('c-cap').value = c.F_CAPAS ||'';
+    })
+    .getConfig();
+}
+
+function saveConfig(){
+  const cfg={ SS_ID:document.getElementById('c-ss').value.trim(), F_AUDIOS:document.getElementById('c-aud').value.trim(), F_LETRAS:document.getElementById('c-ltr').value.trim(), F_CAPAS:document.getElementById('c-cap').value.trim() };
+  google.script.run
+    .withSuccessHandler(()=>{ const s=document.getElementById('c-saved'); s.style.display='inline'; setTimeout(()=>s.style.display='none',2200); st('Config salva'); })
+    .withFailureHandler(e=>st('Erro: '+e.message,'err'))
+    .saveConfig(cfg);
+}
+
+// ── UTILS ─────────────────────────────────────────────────────
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function toast(msg){
+  let t=document.getElementById('ap-toast');
+  if(!t){ t=document.createElement('div'); t.id='ap-toast'; t.style.cssText='position:fixed;bottom:44px;left:50%;transform:translateX(-50%) translateY(50px);background:#201a13;border:1px solid rgba(220,175,100,.28);border-radius:100px;padding:8px 18px;font-size:11px;color:#ede0c5;z-index:999;transition:transform .28s,opacity .18s;opacity:0;pointer-events:none;font-family:var(--ffm)'; document.body.appendChild(t); }
+  t.textContent=msg; t.style.opacity='1'; t.style.transform='translateX(-50%) translateY(0)';
+  clearTimeout(t._t); t._t=setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateX(-50%) translateY(50px)'; },2400);
+}
+
+// Close modal clicking overlay
+document.getElementById('modal').addEventListener('click',e=>{ if(e.target===document.getElementById('modal')) closeModal(); });
+</script>
+</body>
+</html>
