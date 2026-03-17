@@ -16,7 +16,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400;1,700&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/7.7.3/wavesurfer.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
@@ -159,7 +158,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;b
 [data-theme="crate"] .player{border-radius:var(--r1);border-left:3px solid var(--ac)}
 [data-theme="dark"]  .player{border-radius:var(--r3)}
 [data-theme="light"] .player{border-radius:var(--r2)}
-#waveform{margin-bottom:14px;min-height:52px}
+#waveform{margin-bottom:14px;min-height:52px}.prog-wrap{margin-bottom:14px;cursor:pointer;padding:6px 0}.prog-bg{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}.prog-fill{height:100%;width:0%;background:var(--ac);border-radius:2px;transition:width .1s linear}
 .p-ctrl{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:12px}
 .p-time{font-family:var(--ffm);font-size:11px;color:var(--t3);min-width:34px;text-align:center}
 .p-play{width:48px;height:48px;background:var(--ac);color:var(--bg);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform var(--sp),box-shadow var(--tr)}
@@ -289,7 +288,8 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;b
         <p class="trk-date" id="trk-date"></p>
       </div>
       <div class="player">
-        <div id="waveform"></div>
+        <audio id="aud" style="display:none" preload="none"></audio>
+      <div class="prog-wrap" id="prog-wrap"><div class="prog-bg"><div class="prog-fill" id="prog-fill"></div></div></div>
         <div class="p-ctrl">
           <span class="p-time" id="p-cur">0:00</span>
           <button class="p-play" id="p-play">
@@ -543,34 +543,63 @@ const MusicPage = {
   },
 
   loadPlayer(s) {
-    if (S.player) { try{S.player.destroy()}catch(e){} S.player=null; }
-    const pkey='pos_'+s.id;
-    if (!s.audio_id) {
-      $('waveform').innerHTML=`<p style="text-align:center;padding:18px;color:var(--t3);font-family:var(--ffm);font-size:11px">— áudio não disponível —</p>`;
-      return;
-    }
-    S.player = WaveSurfer.create({
-      container:'#waveform',
-      waveColor:'rgba(200,165,110,0.18)',
-      progressColor:'rgba(233,170,58,0.82)',
-      cursorColor:'var(--ac)',cursorWidth:2,
-      barWidth:2,barGap:1,barRadius:2,height:52,normalize:true,
-    });
-    S.player.load('https://docs.google.com/uc?export=open&id='+s.audio_id);
-    S.player.on('ready', () => {
-      const sv=parseFloat(localStorage.getItem(pkey)||'0');
-      if (sv>0) S.player.seekTo(sv/S.player.getDuration());
-      $('p-tot').textContent=fmtT(S.player.getDuration());
-    });
-    S.player.on('audioprocess', t => { $('p-cur').textContent=fmtT(t); localStorage.setItem(pkey,t.toFixed(1)); });
-    S.player.on('play',   () => { S.playing=true;  $('ic-play').classList.add('hidden');    $('ic-pause').classList.remove('hidden'); $('mini-btn').textContent='⏸'; $('vinyl').classList.add('spin'); });
-    S.player.on('pause',  () => { S.playing=false; $('ic-play').classList.remove('hidden'); $('ic-pause').classList.add('hidden');    $('mini-btn').textContent='▶'; $('vinyl').classList.remove('spin'); });
-    S.player.on('finish', () => { S.playing=false; localStorage.removeItem(pkey); });
-    $('p-play').onclick  = () => S.player.playPause();
-    $('mini-btn').onclick = () => S.player&&S.player.playPause();
-    const v=$('vol'); S.player.setVolume(parseFloat(v.value)); v.oninput=()=>S.player.setVolume(parseFloat(v.value));
-    document.onkeydown = e => { if(e.code==='Space'&&e.target.tagName!=='TEXTAREA'&&e.target.tagName!=='INPUT'){e.preventDefault();S.player&&S.player.playPause();} };
-  },
+    const audio = $('aud');
+    audio.pause(); audio.src = '';
+    S.playing = false;
+    $('ic-play').classList.remove('hidden');
+    $('ic-pause').classList.add('hidden');
+    $('prog-fill').style.width = '0%';
+    $('p-cur').textContent = '0:00';
+    $('p-tot').textContent = '0:00';
+
+    if (!s.audio_id) return;
+
+    const pkey = 'pos_' + s.id;
+    audio.src = 'https://drive.google.com/uc?export=download&id=' + s.audio_id;
+    audio.volume = parseFloat($('vol').value);
+    audio.load();
+
+    audio.onloadedmetadata = () => {
+      $('p-tot').textContent = fmtT(audio.duration);
+      const sv = parseFloat(localStorage.getItem(pkey) || '0');
+      if (sv > 0 && sv < audio.duration) audio.currentTime = sv;
+    };
+    audio.ontimeupdate = () => {
+      if (!audio.duration) return;
+      $('prog-fill').style.width = (audio.currentTime/audio.duration*100) + '%';
+      $('p-cur').textContent = fmtT(audio.currentTime);
+      localStorage.setItem(pkey, audio.currentTime.toFixed(1));
+    };
+    audio.onplay = () => {
+      S.playing=true;
+      $('ic-play').classList.add('hidden'); $('ic-pause').classList.remove('hidden');
+      $('mini-btn').textContent='⏸'; $('vinyl').classList.add('spin');
+    };
+    audio.onpause = () => {
+      S.playing=false;
+      $('ic-play').classList.remove('hidden'); $('ic-pause').classList.add('hidden');
+      $('mini-btn').textContent='▶'; $('vinyl').classList.remove('spin');
+    };
+    audio.onended = () => {
+      S.playing=false; localStorage.removeItem(pkey);
+      $('prog-fill').style.width='0%';
+      $('ic-play').classList.remove('hidden'); $('ic-pause').classList.add('hidden');
+    };
+    $('prog-wrap').onclick = (e) => {
+      if (!audio.duration) return;
+      const r = $('prog-wrap').getBoundingClientRect();
+      audio.currentTime = ((e.clientX-r.left)/r.width) * audio.duration;
+    };
+    const toggle = () => audio.paused ? audio.play() : audio.pause();
+    $('p-play').onclick = toggle;
+    $('mini-btn').onclick = toggle;
+    $('vol').oninput = () => { audio.volume = parseFloat($('vol').value); };
+    document.onkeydown = (e) => {
+      if (e.code==='Space' && e.target.tagName!=='TEXTAREA' && e.target.tagName!=='INPUT') {
+        e.preventDefault(); toggle();
+      }
+    };
+  }
 
   async loadLyrics(s) {
     const sc=$('lyr-scroll');
