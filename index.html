@@ -556,7 +556,7 @@ const MusicPage = {
       cursorColor:'var(--ac)',cursorWidth:2,
       barWidth:2,barGap:1,barRadius:2,height:52,normalize:true,
     });
-    S.player.load('https://drive.google.com/file/d/'+s.audio_id+'/preview');
+    S.player.load('https://docs.google.com/uc?export=open&id='+s.audio_id);
     S.player.on('ready', () => {
       const sv=parseFloat(localStorage.getItem(pkey)||'0');
       if (sv>0) S.player.seekTo(sv/S.player.getDuration());
