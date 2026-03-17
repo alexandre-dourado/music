@@ -23,16 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject GAS URL
-        run: |
-          if [ -n "${{ secrets.GAS_URL }}" ]; then
-            sed -i "s|window.__GAS_URL__ || ''|'${{ secrets.GAS_URL }}'|g" public/index.html
-            echo "✅ GAS_URL injetado"
-            grep "GAS_URL" public/index.html | head -1
-          else
-            echo "⚠️  secret GAS_URL não encontrado — app rodará em modo demo"
-          fi
-
       - uses: actions/configure-pages@v4
 
       - uses: actions/upload-pages-artifact@v3
