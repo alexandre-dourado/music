@@ -1,23 +1,78 @@
 // ════════════════════════════════════════════════════════════
-//  FANTASMA — Code.gs   Google Apps Script Backend
-//  Run setupSheets() once to initialize. Then use onOpen() menu.
+//  FANTASMA — Code.gs
+//  ✅ CONFIGURAÇÃO DIRETA — edite os IDs abaixo
 // ════════════════════════════════════════════════════════════
 
-// ── CONFIG ── read from Script Properties (set via Admin Panel)
-function CFG() {
-  const p = PropertiesService.getScriptProperties().getProperties();
+const SS_ID    = '1OkbnwXbNjrsBRvN-q1dQ2abvu3YIXkgvwrJ6USCcZQk';
+const F_AUDIOS = '1cxA2v4sP3KPaHvE9ZolXTbv27ITjIOxs';
+const F_LETRAS = '1Mnpf1zvKVG75a2F14r5ks-dmnP0o8S9j';
+const F_CAPAS  = '12V0e1UlJTehjk075O6Vp8HBeq-Rc3Ob0';
+const TTL      = 300; // cache em segundos
+
+// ── HELPERS ──────────────────────────────────────────────────
+
+function ss()     { return SpreadsheetApp.openById(SS_ID); }
+function sh(n)    { return ss().getSheetByName(n); }
+function clearCache() {
+  const c = CacheService.getScriptCache();
+  ['musicas','fb_map','lyr_'].forEach(k => {
+    try { c.remove(k); } catch(e) {}
+  });
+  // limpa chaves de letras também
+  try {
+    const sheet = sh('musicas');
+    if (sheet && sheet.getLastRow() > 1) {
+      const ids = sheet.getRange(2, 4, sheet.getLastRow()-1, 1).getValues().flat();
+      ids.filter(Boolean).forEach(id => { try { c.remove('lyr_'+id); } catch(e){} });
+    }
+  } catch(e) {}
+}
+
+function rows(sheet) {
+  const v = sheet.getDataRange().getValues();
+  if (v.length < 2) return [];
+  const [hdr, ...data] = v;
+  return data.map(r => Object.fromEntries(hdr.map((h,i) => [h, r[i]])));
+}
+
+function safe(m) {
   return {
-    SS_ID:    p.SS_ID    || '',
-    F_AUDIOS: p.F_AUDIOS || '',
-    F_LETRAS: p.F_LETRAS || '',
-    F_CAPAS:  p.F_CAPAS  || '',
-    CACHE_TTL: 300,
+    id:              String(m.id || ''),
+    titulo:          String(m.titulo || ''),
+    audio_id:        String(m.audio_id || ''),
+    letra_id:        String(m.letra_id || ''),
+    capa_id:         String(m.capa_id || ''),
+    notas_autor:     String(m.notas_autor || ''),
+    ordem:           Number(m.ordem) || 0,
+    data_publicacao: m.data_publicacao ? String(m.data_publicacao) : '',
   };
 }
 
-// ── WEB APP ──────────────────────────────────────────────────
+// ── doGet — serve o app E responde chamadas de API ────────────
 
 function doGet(e) {
+  const fn = e.parameter.fn;
+
+  // Chamada de API vinda do GitHub Pages
+  if (fn) {
+    const allowed = ['getMusicas', 'getLyrics'];
+    const output = (data) =>
+      ContentService.createTextOutput(JSON.stringify(data))
+        .setMimeType(ContentService.MimeType.JSON);
+
+    if (!allowed.includes(fn)) return output({ error: 'not allowed' });
+
+    try {
+      const args = e.parameter.args ? JSON.parse(e.parameter.args) : [];
+      if (fn === 'getMusicas') return output(getMusicas());
+      if (fn === 'getLyrics')  return output(getLyrics(args[0] || ''));
+    } catch(err) {
+      return ContentService.createTextOutput(JSON.stringify({ error: err.message }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  // Serve o app HTML normalmente
   const t = HtmlService.createTemplateFromFile('index');
   t.page    = e.parameter.page || 'gallery';
   t.musicId = e.parameter.id   || '';
@@ -29,42 +84,32 @@ function doGet(e) {
 
 function include(f) { return HtmlService.createHtmlOutputFromFile(f).getContent(); }
 
-// ── SHEET HELPERS ─────────────────────────────────────────────
+// ── API PÚBLICA ───────────────────────────────────────────────
 
-function ss()         { return SpreadsheetApp.openById(CFG().SS_ID); }
-function sh(name)     { return ss().getSheetByName(name); }
-function rows(sheet)  {
-  const v = sheet.getDataRange().getValues();
-  if (v.length < 2) return [];
-  const [hdr, ...data] = v;
-  return data.map(r => Object.fromEntries(hdr.map((h,i) => [h, r[i]])));
-}
-
-// ── PUBLIC API ────────────────────────────────────────────────
-
-/** Returns published songs with aggregated feedback. Cached. */
 function getMusicas() {
   const cache = CacheService.getScriptCache();
   const hit = cache.get('musicas');
   if (hit) return JSON.parse(hit);
 
-  const all = rows(sh('musicas'));
+  const sheet = sh('musicas');
+  if (!sheet) return [];
+
+  const all = rows(sheet);
   const pub = all
     .filter(m => String(m.publicar).toUpperCase() === 'TRUE')
     .sort((a,b) => Number(a.ordem) - Number(b.ordem))
     .map(safe);
 
   const fm = feedbackMap();
-  pub.forEach(m => { m.feedback = fm[m.id] || { media_nota:null, total_notas:0, reacoes:{} }; });
+  pub.forEach(m => {
+    m.feedback = fm[m.id] || { media_nota:null, total_notas:0, reacoes:{} };
+  });
 
   const out = JSON.stringify(pub);
-  cache.put('musicas', out, CFG().CACHE_TTL);
+  cache.put('musicas', out, TTL);
   return JSON.parse(out);
 }
 
-function getMusica(id) { return getMusicas().find(m => String(m.id)===String(id)) || null; }
-
-/** Returns lyrics text from Drive. Cached per file. */
 function getLyrics(letraId) {
   if (!letraId) return '';
   const cache = CacheService.getScriptCache();
@@ -73,20 +118,19 @@ function getLyrics(letraId) {
   if (hit) return hit;
   try {
     const txt = DriveApp.getFileById(letraId).getBlob().getDataAsString('UTF-8');
-    cache.put(key, txt, CFG().CACHE_TTL * 6);
+    cache.put(key, txt, TTL * 6);
     return txt;
   } catch(e) { return ''; }
 }
 
-/** Submit listener feedback. Validates & sanitizes all input. */
 function submitFeedback(p) {
   const { musica_id, nota, reacao, comentario, user_hash } = p;
-  if (!musica_id) throw new Error('musica_id é obrigatório');
-  if (nota != null && (isNaN(nota) || nota < 1 || nota > 5)) throw new Error('nota deve ser 1-5');
+  if (!musica_id) throw new Error('musica_id obrigatório');
+  if (nota != null && (isNaN(nota) || nota < 1 || nota > 5)) throw new Error('nota inválida');
   if (reacao && !['👍','🔥','💭',''].includes(reacao)) throw new Error('reação inválida');
-  const safeCmt = String(comentario || '').replace(/<[^>]*>/g,'').substring(0,1000);
-  sh('feedback').appendRow([new Date(), String(musica_id), nota?Number(nota):'', reacao||'', safeCmt, String(user_hash||'').substring(0,64)]);
-  CacheService.getScriptCache().removeAll();
+  const cmt = String(comentario||'').replace(/<[^>]*>/g,'').substring(0,1000);
+  sh('feedback').appendRow([new Date(), String(musica_id), nota?Number(nota):'', reacao||'', cmt, String(user_hash||'').substring(0,64)]);
+  clearCache();
   return { success: true };
 }
 
@@ -96,38 +140,39 @@ function feedbackMap() {
   const cache = CacheService.getScriptCache();
   const hit = cache.get('fb_map');
   if (hit) return JSON.parse(hit);
+
   const sheet = sh('feedback');
-  if (sheet.getLastRow() < 2) return {};
+  if (!sheet || sheet.getLastRow() < 2) return {};
+
   const data = sheet.getRange(2,1,sheet.getLastRow()-1,6).getValues();
   const map = {};
   data.forEach(([,id,nota,reacao]) => {
+    if (!id) return;
     if (!map[id]) map[id] = { notas:[], reacoes:{} };
     if (nota !== '' && !isNaN(nota)) map[id].notas.push(Number(nota));
-    if (reacao) map[id].reacoes[reacao] = (map[id].reacoes[reacao]||0) + 1;
+    if (reacao) map[id].reacoes[reacao] = (map[id].reacoes[reacao]||0)+1;
   });
+
   const out = {};
   Object.keys(map).forEach(id => {
-    const { notas, reacoes } = map[id];
+    const {notas,reacoes} = map[id];
     out[id] = {
-      media_nota: notas.length ? Math.round(notas.reduce((a,b)=>a+b,0)/notas.length*10)/10 : null,
+      media_nota:  notas.length ? Math.round(notas.reduce((a,b)=>a+b,0)/notas.length*10)/10 : null,
       total_notas: notas.length,
       reacoes,
     };
   });
-  cache.put('fb_map', JSON.stringify(out), CFG().CACHE_TTL);
+
+  cache.put('fb_map', JSON.stringify(out), TTL);
   return out;
 }
 
-function safe(m) {
-  return { id:m.id, titulo:m.titulo, audio_id:m.audio_id, letra_id:m.letra_id,
-           capa_id:m.capa_id, notas_autor:m.notas_autor, ordem:m.ordem,
-           data_publicacao: m.data_publicacao ? String(m.data_publicacao) : '' };
-}
-
-// ── ADMIN: READ ALL (including unpublished) ───────────────────
+// ── ADMIN ─────────────────────────────────────────────────────
 
 function adminGetAll() {
-  const all = rows(sh('musicas'));
+  const sheet = sh('musicas');
+  if (!sheet) return [];
+  const all = rows(sheet);
   const fm = feedbackMap();
   return all.map(m => ({
     ...m,
@@ -136,19 +181,16 @@ function adminGetAll() {
   }));
 }
 
-// ── ADMIN: UPDATE FIELDS ──────────────────────────────────────
-
 function adminUpdate(id, updates) {
   const sheet = sh('musicas');
   const [hdr, ...data] = sheet.getDataRange().getValues();
   const idx = data.findIndex(r => String(r[hdr.indexOf('id')]) === String(id));
-  if (idx < 0) throw new Error('Música não encontrada: ' + id);
-  const row = idx + 2;
+  if (idx < 0) throw new Error('Não encontrada: ' + id);
   Object.entries(updates).forEach(([field, val]) => {
     const col = hdr.indexOf(field);
-    if (col >= 0) sheet.getRange(row, col+1).setValue(val);
+    if (col >= 0) sheet.getRange(idx+2, col+1).setValue(val);
   });
-  CacheService.getScriptCache().removeAll();
+  clearCache();
   return { success: true };
 }
 
@@ -157,8 +199,8 @@ function adminDelete(id) {
   const [hdr, ...data] = sheet.getDataRange().getValues();
   const idx = data.findIndex(r => String(r[hdr.indexOf('id')]) === String(id));
   if (idx < 0) throw new Error('Não encontrada');
-  sheet.deleteRow(idx + 2);
-  CacheService.getScriptCache().removeAll();
+  sheet.deleteRow(idx+2);
+  clearCache();
   return { success: true };
 }
 
@@ -169,154 +211,121 @@ function adminTogglePublish(id) {
   return adminUpdate(id, { publicar: s.publicar ? 'FALSE' : 'TRUE' });
 }
 
-function adminReorder(ids) {
-  ids.forEach((id,i) => adminUpdate(id, { ordem: i+1 }));
-  return { success: true };
-}
-
-// ── ADMIN: FOLDER SCAN ────────────────────────────────────────
-
-/**
- * Scans /audios folder. Matches /letras and /capas by filename stem.
- * Adds new songs to the sheet (skips existing audio_ids).
- */
 function adminScanFolders() {
-  const cfg = CFG();
-  if (!cfg.F_AUDIOS) return { error: 'Pasta /audios não configurada. Abra Config no painel.' };
+  if (!F_AUDIOS) return { error: 'F_AUDIOS não configurado no Code.gs' };
   const sheet = sh('musicas');
   const existing = rows(sheet);
   const existingIds = new Set(existing.map(m => String(m.audio_id)));
 
-  // Build lookup maps for letras and capas
   const lyricMap = {}, coverMap = {};
-  if (cfg.F_LETRAS) {
-    const it = DriveApp.getFolderById(cfg.F_LETRAS).getFiles();
-    while (it.hasNext()) { const f=it.next(); lyricMap[stem(f.getName())] = f.getId(); }
+  if (F_LETRAS) {
+    const it = DriveApp.getFolderById(F_LETRAS).getFiles();
+    while (it.hasNext()) { const f=it.next(); lyricMap[stemName(f.getName())] = f.getId(); }
   }
-  if (cfg.F_CAPAS) {
-    const it = DriveApp.getFolderById(cfg.F_CAPAS).getFiles();
-    while (it.hasNext()) { const f=it.next(); coverMap[stem(f.getName())] = f.getId(); }
+  if (F_CAPAS) {
+    const it = DriveApp.getFolderById(F_CAPAS).getFiles();
+    while (it.hasNext()) { const f=it.next(); coverMap[stemName(f.getName())] = f.getId(); }
   }
 
   const added=[], skipped=[];
   let order = existing.length ? Math.max(...existing.map(m=>Number(m.ordem)||0))+1 : 1;
 
-  const audioIt = DriveApp.getFolderById(cfg.F_AUDIOS).getFiles();
-  while (audioIt.hasNext()) {
-    const file = audioIt.next();
-    const id = file.getId(), name = file.getName(), s = stem(name);
-    const mime = file.getMimeType();
-    // Only audio files
-    if (!mime.startsWith('audio/') && !name.match(/\.(mp3|wav|m4a|ogg|flac|aac)$/i)) { skipped.push(name+' (não é áudio)'); continue; }
-    if (existingIds.has(id)) { skipped.push(name); continue; }
+  const it = DriveApp.getFolderById(F_AUDIOS).getFiles();
+  while (it.hasNext()) {
+    const file = it.next();
+    const fid=file.getId(), name=file.getName(), s=stemName(name);
+    if (!file.getMimeType().startsWith('audio/') && !name.match(/\.(mp3|wav|m4a|ogg|flac|aac)$/i)) {
+      skipped.push(name+' (não é áudio)'); continue;
+    }
+    if (existingIds.has(fid)) { skipped.push(name); continue; }
     const letraId = lyricMap[s] || lyricMap[s.toLowerCase()] || '';
     const capaId  = coverMap[s] || coverMap[s.toLowerCase()]  || '';
-    sheet.appendRow(['auto_'+id.slice(0,8), s, id, letraId, capaId, '', 'FALSE', order, new Date().toISOString().split('T')[0]]);
-    order++;
-    added.push(name);
+    sheet.appendRow(['auto_'+fid.slice(0,8), s, fid, letraId, capaId, '', 'FALSE', order, new Date().toISOString().split('T')[0]]);
+    order++; added.push(name);
   }
-
-  CacheService.getScriptCache().removeAll();
+  clearCache();
   return { added, skipped };
 }
 
-function stem(n) { return n.replace(/\.[^.]+$/,''); }
+function stemName(n) { return n.replace(/\.[^.]+$/,''); }
 
-// ── ADMIN: COVER UPLOAD ───────────────────────────────────────
-
-/**
- * Receives a base64 image from the admin panel, saves to /capas folder.
- * Returns the Drive file ID.
- */
 function adminUploadCover(base64Data, mimeType, filename) {
-  const cfg = CFG();
-  if (!cfg.F_CAPAS) throw new Error('Pasta /capas não configurada');
-  const folder = DriveApp.getFolderById(cfg.F_CAPAS);
+  if (!F_CAPAS) throw new Error('F_CAPAS não configurado');
+  const folder = DriveApp.getFolderById(F_CAPAS);
   const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, filename);
   const file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   return file.getId();
 }
 
-// ── ADMIN: FEEDBACK VIEW ──────────────────────────────────────
-
 function adminGetFeedback(musicaId) {
   const sheet = sh('feedback');
-  if (sheet.getLastRow() < 2) return [];
+  if (!sheet || sheet.getLastRow() < 2) return [];
   return sheet.getRange(2,1,sheet.getLastRow()-1,6).getValues()
     .filter(r => String(r[1]) === String(musicaId))
     .map(r => ({ timestamp:r[0], nota:r[2]||null, reacao:r[3]||'', comentario:r[4]||'', user_hash:String(r[5]).slice(0,10)+'…' }));
 }
 
-// ── ADMIN: CACHE ──────────────────────────────────────────────
-
-function adminFlushCache() {
-  CacheService.getScriptCache().removeAll();
-  return { success: true };
-}
-
-// ── CONFIG (Script Properties) ────────────────────────────────
+function adminFlushCache() { clearCache(); return { success: true }; }
 
 function getConfig() {
-  const p = PropertiesService.getScriptProperties().getProperties();
-  return { SS_ID:p.SS_ID||'', F_AUDIOS:p.F_AUDIOS||'', F_LETRAS:p.F_LETRAS||'', F_CAPAS:p.F_CAPAS||'' };
+  return { SS_ID, F_AUDIOS, F_LETRAS, F_CAPAS };
 }
 
 function saveConfig(cfg) {
-  PropertiesService.getScriptProperties().setProperties(cfg);
+  // Com IDs hardcoded, apenas retorna OK. Para mudar, edite as constantes no topo.
   return { success: true };
 }
 
-// ── SPREADSHEET MENU ──────────────────────────────────────────
+// ── MENU DA PLANILHA ──────────────────────────────────────────
 
-/** Auto-runs when the spreadsheet opens — adds the Fantasma menu. */
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('🎵 Fantasma')
     .addItem('Abrir Painel Admin',         'openAdminPanel')
     .addSeparator()
-    .addItem('📂 Escanear pastas do Drive', 'runScan')
-    .addItem('🔄 Limpar cache',             'runFlushCache')
-    .addSeparator()
-    .addItem('⚙ Configurar IDs',           'openConfig')
+    .addItem('📂 Escanear pastas',         'runScan')
+    .addItem('🔄 Limpar cache',            'runFlushCache')
     .addToUi();
 }
 
 function openAdminPanel() {
-  const html = HtmlService.createHtmlOutputFromFile('AdminPanel').setWidth(940).setHeight(720).setTitle('🎵 Fantasma Admin');
+  const html = HtmlService.createHtmlOutputFromFile('AdminPanel')
+    .setWidth(940).setHeight(720).setTitle('🎵 Fantasma Admin');
   SpreadsheetApp.getUi().showModalDialog(html, '🎵 Painel Admin');
-}
-
-function openConfig() {
-  const html = HtmlService.createHtmlOutputFromFile('AdminConfig').setWidth(520).setHeight(420).setTitle('⚙ Configurações');
-  SpreadsheetApp.getUi().showModalDialog(html, '⚙ Configurações');
 }
 
 function runScan() {
   const r = adminScanFolders();
-  if (r.error) { SpreadsheetApp.getUi().alert('❌ ' + r.error); return; }
-  SpreadsheetApp.getUi().alert(`Scan concluído!\n\n✅ Adicionadas (${r.added.length}):\n${r.added.map(n=>' • '+n).join('\n')||'  (nenhuma nova)'}\n\n⏭ Ignoradas (${r.skipped.length}):\n${r.skipped.map(n=>' · '+n).join('\n')||'  (nenhuma)'}`);
+  if (r.error) { SpreadsheetApp.getUi().alert('❌ '+r.error); return; }
+  SpreadsheetApp.getUi().alert(
+    'Scan concluído!\n\n✅ Adicionadas ('+r.added.length+'):\n'+
+    (r.added.map(n=>' • '+n).join('\n')||'  (nenhuma nova)')+
+    '\n\n⏭ Ignoradas ('+r.skipped.length+'):\n'+
+    (r.skipped.map(n=>' · '+n).join('\n')||'  (nenhuma)')
+  );
 }
 
 function runFlushCache() {
-  adminFlushCache();
+  clearCache();
   SpreadsheetApp.getUi().alert('✅ Cache limpo!');
 }
 
-// ── SETUP (run once) ──────────────────────────────────────────
+// ── SETUP (rodar uma vez) ─────────────────────────────────────
 
 function setupSheets() {
-  const SS = ss();
-  function ensureSheet(name, headers, bgColor) {
-    let sh = SS.getSheetByName(name);
-    if (!sh) {
-      sh = SS.insertSheet(name);
-      sh.appendRow(headers);
-      sh.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground(bgColor).setFontColor('#ffffff');
+  const s = ss();
+  function ensure(name, headers) {
+    let sheet = s.getSheetByName(name);
+    if (!sheet) {
+      sheet = s.insertSheet(name);
+      sheet.appendRow(headers);
+      sheet.getRange(1,1,1,headers.length).setFontWeight('bold')
+        .setBackground('#1a1208').setFontColor('#ffffff');
     }
-    return sh;
+    return sheet;
   }
-  ensureSheet('musicas',  ['id','titulo','audio_id','letra_id','capa_id','notas_autor','publicar','ordem','data_publicacao'], '#1a1208');
-  ensureSheet('feedback', ['timestamp','musica_id','nota','reacao','comentario','user_hash'], '#0a0a14');
-  Logger.log('✅ Sheets criadas com sucesso.');
+  ensure('musicas',  ['id','titulo','audio_id','letra_id','capa_id','notas_autor','publicar','ordem','data_publicacao']);
+  ensure('feedback', ['timestamp','musica_id','nota','reacao','comentario','user_hash']);
+  Logger.log('✅ Pronto!');
 }

@@ -27,15 +27,11 @@ jobs:
         run: |
           if [ -n "${{ secrets.GAS_URL }}" ]; then
             sed -i "s|window.__GAS_URL__ || ''|'${{ secrets.GAS_URL }}'|g" public/index.html
-            echo "GAS_URL injetado com sucesso"
+            echo "✅ GAS_URL injetado"
+            grep "GAS_URL" public/index.html | head -1
           else
-            echo "AVISO: secret GAS_URL não encontrado"
+            echo "⚠️  secret GAS_URL não encontrado — app rodará em modo demo"
           fi
-
-      - name: Verify injection
-        run: |
-          grep -o "GAS_URL.*=.*'" public/index.html | head -1 || echo "Linha GAS_URL:"
-          grep "GAS_URL" public/index.html | head -3
 
       - uses: actions/configure-pages@v4
 
